@@ -295,6 +295,8 @@ def summary : F<"summary">;
 // The flags below do nothing. They are defined only for link.exe compatibility.
 //==============================================================================
 
+def release : F<"release">, HelpText<"Link without symbol table in the image">;
+
 def ignoreidl : F<"ignoreidl">;
 def ltcg : F<"ltcg">;
 def assemblydebug : F<"assemblydebug">;
