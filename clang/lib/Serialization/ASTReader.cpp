@@ -1669,11 +1669,38 @@ Token ASTReader::ReadToken(ModuleFile &F, const RecordDataImpl &Record,
   Token Tok;
   Tok.startToken();
   Tok.setLocation(ReadSourceLocation(F, Record, Idx));
-  Tok.setLength(Record[Idx++]);
-  if (IdentifierInfo *II = getLocalIdentifier(F, Record[Idx++]))
-    Tok.setIdentifierInfo(II);
   Tok.setKind((tok::TokenKind)Record[Idx++]);
   Tok.setFlag((Token::TokenFlags)Record[Idx++]);
+
+  if (Tok.isAnnotation()) {
+    Tok.setAnnotationEndLoc(ReadSourceLocation(F, Record, Idx));
+    switch (Tok.getKind()) {
+    case tok::annot_pragma_loop_hint: {
+      auto *Info = new (PP.getPreprocessorAllocator()) PragmaLoopHintInfo;
+      Info->PragmaName = ReadToken(F, Record, Idx);
+      Info->Option = ReadToken(F, Record, Idx);
+      unsigned NumTokens = Record[Idx++];
+      SmallVector<Token, 4> Toks;
+      Toks.reserve(NumTokens);
+      for (unsigned I = 0; I < NumTokens; ++I)
+        Toks.push_back(ReadToken(F, Record, Idx));
+      Info->Toks = llvm::makeArrayRef(Toks).copy(PP.getPreprocessorAllocator());
+      Tok.setAnnotationValue(static_cast<void *>(Info));
+      break;
+    }
+    // Some annotation tokens do not use the PtrData field.
+    case tok::annot_pragma_openmp:
+    case tok::annot_pragma_openmp_end:
+    case tok::annot_pragma_unused:
+      break;
+    default:
+      llvm_unreachable("missing deserialization code for annotation token");
+    }
+  } else {
+    Tok.setLength(Record[Idx++]);
+    if (IdentifierInfo *II = getLocalIdentifier(F, Record[Idx++]))
+      Tok.setIdentifierInfo(II);
+  }
   return Tok;
 }
 
@@ -6361,15 +6388,17 @@ void ASTReader::ReadPragmaDiagnosticMappings(DiagnosticsEngine &Diag) {
     while (NumLocations--) {
       assert(Idx < Record.size() &&
              "Invalid data, missing pragma diagnostic states");
-      FileID FID = ReadFileID(F, Record, Idx);
-      assert(FID.isValid() && "invalid FileID for transition");
+      SourceLocation Loc = ReadSourceLocation(F, Record[Idx++]);
+      auto IDAndOffset = SourceMgr.getDecomposedLoc(Loc);
+      assert(IDAndOffset.first.isValid() && "invalid FileID for transition");
+      assert(IDAndOffset.second == 0 && "not a start location for a FileID");
       unsigned Transitions = Record[Idx++];
 
       // Note that we don't need to set up Parent/ParentOffset here, because
       // we won't be changing the diagnostic state within imported FileIDs
       // (other than perhaps appending to the main source file, which has no
       // parent).
-      auto &F = Diag.DiagStatesByLoc.Files[FID];
+      auto &F = Diag.DiagStatesByLoc.Files[IDAndOffset.first];
       F.StateTransitions.reserve(F.StateTransitions.size() + Transitions);
       for (unsigned I = 0; I != Transitions; ++I) {
         unsigned Offset = Record[Idx++];

@@ -735,7 +735,7 @@ static void getCopyToPartsVector(SelectionDAG &DAG, const SDLoc &DL,
   assert(IntermediateVT.isScalableVector() == ValueVT.isScalableVector() &&
          "Mixing scalable and fixed vectors when copying in parts");
 
-  Optional<ElementCount> DestEltCnt;
+  std::optional<ElementCount> DestEltCnt;
 
   if (IntermediateVT.isVector())
     DestEltCnt = IntermediateVT.getVectorElementCount() * NumIntermediates;
@@ -1698,8 +1698,8 @@ SDValue SelectionDAGBuilder::getValueImpl(const Value *V) {
     DenseMap<const AllocaInst*, int>::iterator SI =
       FuncInfo.StaticAllocaMap.find(AI);
     if (SI != FuncInfo.StaticAllocaMap.end())
-      return DAG.getFrameIndex(SI->second,
-                               TLI.getFrameIndexTy(DAG.getDataLayout()));
+      return DAG.getFrameIndex(
+          SI->second, TLI.getValueType(DAG.getDataLayout(), AI->getType()));
   }
 
   // If this is an instruction which fast-isel has deferred, select it now.
@@ -4033,7 +4033,7 @@ void SelectionDAGBuilder::visitAlloca(const AllocaInst &I) {
 
   SDValue AllocSize = getValue(I.getArraySize());
 
-  EVT IntPtr = TLI.getPointerTy(DAG.getDataLayout(), DL.getAllocaAddrSpace());
+  EVT IntPtr = TLI.getPointerTy(DAG.getDataLayout(), I.getAddressSpace());
   if (AllocSize.getValueType() != IntPtr)
     AllocSize = DAG.getZExtOrTrunc(AllocSize, dl, IntPtr);
 
@@ -4865,11 +4865,17 @@ void SelectionDAGBuilder::visitTargetIntrinsic(const CallInst &I,
   TLI.CollectTargetIntrinsicOperands(I, Ops, DAG);
   if (IsTgtIntrinsic) {
     // This is target intrinsic that touches memory
-    Result =
-        DAG.getMemIntrinsicNode(Info.opc, getCurSDLoc(), VTs, Ops, Info.memVT,
-                                MachinePointerInfo(Info.ptrVal, Info.offset),
-                                Info.align, Info.flags, Info.size,
-                                I.getAAMetadata());
+    //
+    // TODO: We currently just fallback to address space 0 if getTgtMemIntrinsic
+    //       didn't yield anything useful.
+    MachinePointerInfo MPI;
+    if (Info.ptrVal)
+      MPI = MachinePointerInfo(Info.ptrVal, Info.offset);
+    else if (Info.fallbackAddressSpace)
+      MPI = MachinePointerInfo(*Info.fallbackAddressSpace);
+    Result = DAG.getMemIntrinsicNode(Info.opc, getCurSDLoc(), VTs, Ops,
+                                     Info.memVT, MPI, Info.align, Info.flags,
+                                     Info.size, I.getAAMetadata());
   } else if (!HasChain) {
     Result = DAG.getNode(ISD::INTRINSIC_WO_CHAIN, getCurSDLoc(), VTs, Ops);
   } else if (!I.getType()->isVoidTy()) {
@@ -5636,7 +5642,7 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
   }
 
   bool IsIndirect = false;
-  Optional<MachineOperand> Op;
+  std::optional<MachineOperand> Op;
   // Some arguments' frame index is recorded during argument lowering.
   int FI = FuncInfo.getArgumentFrameIndex(Arg);
   if (FI != std::numeric_limits<int>::max())
@@ -7396,7 +7402,7 @@ void SelectionDAGBuilder::visitConstrainedFPIntrinsic(
 }
 
 static unsigned getISDForVPIntrinsic(const VPIntrinsic &VPIntrin) {
-  Optional<unsigned> ResOPC;
+  std::optional<unsigned> ResOPC;
   switch (VPIntrin.getIntrinsicID()) {
 #define HELPER_MAP_VPID_TO_VPSD(VPID, VPSD)                                    \
   case Intrinsic::VPID:                                                        \
@@ -9150,7 +9156,7 @@ void SelectionDAGBuilder::visitInlineAsm(const CallBase &Call,
 
         SDValue AsmOp = InOperandVal;
         if (isFunction(InOperandVal)) {
-          auto *GA = dyn_cast<GlobalAddressSDNode>(InOperandVal);
+          auto *GA = cast<GlobalAddressSDNode>(InOperandVal);
           ResOpType = InlineAsm::getFlagWord(InlineAsm::Kind_Func, 1);
           AsmOp = DAG.getTargetGlobalAddress(GA->getGlobal(), getCurSDLoc(),
                                              InOperandVal.getValueType(),

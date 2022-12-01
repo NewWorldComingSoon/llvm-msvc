@@ -123,9 +123,10 @@ CodeGenModule::CodeGenModule(ASTContext &C,
   BFloatTy = llvm::Type::getBFloatTy(LLVMContext);
   FloatTy = llvm::Type::getFloatTy(LLVMContext);
   DoubleTy = llvm::Type::getDoubleTy(LLVMContext);
-  PointerWidthInBits = C.getTargetInfo().getPointerWidth(0);
+  PointerWidthInBits = C.getTargetInfo().getPointerWidth(LangAS::Default);
   PointerAlignInBytes =
-    C.toCharUnitsFromBits(C.getTargetInfo().getPointerAlign(0)).getQuantity();
+      C.toCharUnitsFromBits(C.getTargetInfo().getPointerAlign(LangAS::Default))
+          .getQuantity();
   SizeSizeInBytes =
     C.toCharUnitsFromBits(C.getTargetInfo().getMaxPointerWidth()).getQuantity();
   IntAlignInBytes =
@@ -4002,7 +4003,8 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
     // (If function is requested for a definition, we always need to create a new
     // function, not just return a bitcast.)
     if (!IsForDefinition)
-      return llvm::ConstantExpr::getBitCast(Entry, Ty->getPointerTo());
+      return llvm::ConstantExpr::getBitCast(
+          Entry, Ty->getPointerTo(Entry->getAddressSpace()));
   }
 
   // This function doesn't have a complete type (for example, the return

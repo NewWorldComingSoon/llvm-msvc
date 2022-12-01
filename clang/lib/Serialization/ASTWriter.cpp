@@ -3006,7 +3006,9 @@ void ASTWriter::WritePragmaDiagnosticMappings(const DiagnosticsEngine &Diag,
       continue;
     ++NumLocations;
 
-    AddFileID(FileIDAndFile.first, Record);
+    SourceLocation Loc = Diag.SourceMgr->getComposedLoc(FileIDAndFile.first, 0);
+    assert(!Loc.isInvalid() && "start loc for valid FileID is invalid");
+    AddSourceLocation(Loc, Record);
 
     Record.push_back(FileIDAndFile.second.StateTransitions.size());
     for (auto &StatePoint : FileIDAndFile.second.StateTransitions) {
@@ -4370,15 +4372,37 @@ void ASTRecordWriter::AddAttributes(ArrayRef<const Attr *> Attrs) {
 
 void ASTWriter::AddToken(const Token &Tok, RecordDataImpl &Record) {
   AddSourceLocation(Tok.getLocation(), Record);
-  Record.push_back(Tok.getLength());
-
-  // FIXME: When reading literal tokens, reconstruct the literal pointer
-  // if it is needed.
-  AddIdentifierRef(Tok.getIdentifierInfo(), Record);
   // FIXME: Should translate token kind to a stable encoding.
   Record.push_back(Tok.getKind());
   // FIXME: Should translate token flags to a stable encoding.
   Record.push_back(Tok.getFlags());
+
+  if (Tok.isAnnotation()) {
+    AddSourceLocation(Tok.getAnnotationEndLoc(), Record);
+    switch (Tok.getKind()) {
+    case tok::annot_pragma_loop_hint: {
+      auto *Info = static_cast<PragmaLoopHintInfo *>(Tok.getAnnotationValue());
+      AddToken(Info->PragmaName, Record);
+      AddToken(Info->Option, Record);
+      Record.push_back(Info->Toks.size());
+      for (const auto &T : Info->Toks)
+        AddToken(T, Record);
+      break;
+    }
+    // Some annotation tokens do not use the PtrData field.
+    case tok::annot_pragma_openmp:
+    case tok::annot_pragma_openmp_end:
+    case tok::annot_pragma_unused:
+      break;
+    default:
+      llvm_unreachable("missing serialization code for annotation token");
+    }
+  } else {
+    Record.push_back(Tok.getLength());
+    // FIXME: When reading literal tokens, reconstruct the literal pointer if it
+    // is needed.
+    AddIdentifierRef(Tok.getIdentifierInfo(), Record);
+  }
 }
 
 void ASTWriter::AddString(StringRef Str, RecordDataImpl &Record) {
