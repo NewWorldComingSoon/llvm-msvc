@@ -123,6 +123,11 @@ void calculateSEHStateNumbers(const Function *ParentFn,
 
 void calculateClrEHStateNumbers(const Function *Fn, WinEHFuncInfo &FuncInfo);
 
+// For AsynchEH (VC++ option -EHa)
+void calculateCXXStateForAsynchEH(const BasicBlock *BB, int State,
+                                  WinEHFuncInfo &FuncInfo);
+void calculateSEHStateForAsynchEH(const BasicBlock *BB, int State,
+                                  WinEHFuncInfo &FuncInfo);
 } // end namespace llvm
 
 #endif // LLVM_CODEGEN_WINEHFUNCINFO_H
