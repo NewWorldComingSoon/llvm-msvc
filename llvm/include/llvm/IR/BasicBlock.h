@@ -208,10 +208,10 @@ public:
   /// Returns the first potential AsynchEH faulty instruction
   /// currently it checks for loads/stores (which may dereference a null
   /// pointer) and calls/invokes (which may propagate exceptions)
-  const Instruction *getFirstMayFaultInst() const;
-  Instruction *getFirstMayFaultInst() {
-    return const_cast<Instruction *>(
-        static_cast<const BasicBlock *>(this)->getFirstMayFaultInst());
+  const Instruction* getFirstMayFaultInst() const;
+  Instruction* getFirstMayFaultInst() {
+      return const_cast<Instruction*>(
+          static_cast<const BasicBlock*>(this)->getFirstMayFaultInst());
   }
 
   /// Return a const iterator range over the instructions in the block, skipping
@@ -461,6 +461,32 @@ public:
   BasicBlock *splitBasicBlockBefore(Instruction *I, const Twine &BBName = "") {
     return splitBasicBlockBefore(I->getIterator(), BBName);
   }
+
+  /// Transfer all instructions from \p FromBB to this basic block at \p ToIt.
+  void splice(BasicBlock::iterator ToIt, BasicBlock *FromBB) {
+    splice(ToIt, FromBB, FromBB->begin(), FromBB->end());
+  }
+
+  /// Transfer one instruction from \p FromBB at \p FromIt to this basic block
+  /// at \p ToIt.
+  void splice(BasicBlock::iterator ToIt, BasicBlock *FromBB,
+              BasicBlock::iterator FromIt) {
+    auto FromItNext = std::next(FromIt);
+    // Single-element splice is a noop if destination == source.
+    if (ToIt == FromIt || ToIt == FromItNext)
+      return;
+    splice(ToIt, FromBB, FromIt, FromItNext);
+  }
+
+  /// Transfer a range of instructions that belong to \p FromBB from \p
+  /// FromBeginIt to \p FromEndIt, to this basic block at \p ToIt.
+  void splice(BasicBlock::iterator ToIt, BasicBlock *FromBB,
+              BasicBlock::iterator FromBeginIt,
+              BasicBlock::iterator FromEndIt);
+
+  /// Erases a range of instructions from \p FromIt to (not including) \p ToIt.
+  /// \Returns \p ToIt.
+  BasicBlock::iterator erase(BasicBlock::iterator FromIt, BasicBlock::iterator ToIt);
 
   /// Returns true if there are any uses of this basic block other than
   /// direct branches, switches, etc. to it.

@@ -236,6 +236,7 @@ void llvm::calculateCXXStateForAsynchEH(const BasicBlock *BB, int State,
     WI = WorkList.pop_back_val();
     const BasicBlock *BB = WI->Block;
     int State = WI->State;
+    delete WI;
     if (EHInfo.BlockToStateMap.count(BB) && EHInfo.BlockToStateMap[BB] <= State)
       continue; // skip blocks already visited by lower State
 
@@ -296,6 +297,7 @@ void llvm::calculateSEHStateForAsynchEH(const BasicBlock *BB, int State,
     WI = WorkList.pop_back_val();
     const BasicBlock *BB = WI->Block;
     int State = WI->State;
+    delete WI;
     if (EHInfo.BlockToStateMap.count(BB) && EHInfo.BlockToStateMap[BB] <= State)
       continue; // skip blocks already visited by lower State
 
@@ -590,7 +592,6 @@ void llvm::calculateSEHStateNumbers(const Function *Fn,
     const BasicBlock *EntryBB = &(Fn->getEntryBlock());
     calculateSEHStateForAsynchEH(EntryBB, -1, FuncInfo);
   }
-
 }
 
 void llvm::calculateWinCXXEHStateNumbers(const Function *Fn,
@@ -615,7 +616,6 @@ void llvm::calculateWinCXXEHStateNumbers(const Function *Fn,
     const BasicBlock *EntryBB = &(Fn->getEntryBlock());
     calculateCXXStateForAsynchEH(EntryBB, -1, FuncInfo);
   }
-
 }
 
 static int addClrEHHandler(WinEHFuncInfo &FuncInfo, int HandlerParentState,
@@ -1391,6 +1391,11 @@ void WinEHFuncInfo::addIPToStateRange(const InvokeInst *II,
   assert(InvokeStateMap.count(II) &&
          "should get invoke with precomputed state");
   LabelToStateMap[InvokeBegin] = std::make_pair(InvokeStateMap[II], InvokeEnd);
+}
+
+void WinEHFuncInfo::addIPToStateRange(int State, MCSymbol* InvokeBegin,
+    MCSymbol* InvokeEnd) {
+    LabelToStateMap[InvokeBegin] = std::make_pair(State, InvokeEnd);
 }
 
 WinEHFuncInfo::WinEHFuncInfo() = default;

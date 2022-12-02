@@ -1287,21 +1287,21 @@ void SelectionDAGISel::reportIPToStateForBlocks(MachineFunction *MF) {
   llvm::WinEHFuncInfo *EHInfo = MF->getWinEHFuncInfo();
   if (!EHInfo)
     return;
-  for (auto MBBI = MF->begin(); MBBI != MF->end(); ++MBBI) {
+  for (auto MBBI = MF->begin(), E = MF->end(); MBBI != E; ++MBBI) {
     MachineBasicBlock *MBB = &*MBBI;
     const BasicBlock *BB = MBB->getBasicBlock();
     int State = EHInfo->BlockToStateMap[BB];
     if (BB->getFirstMayFaultInst()) {
       // Report IP range only for blocks with Faulty inst
-      MCSymbol *BeginLabel = MMI.getContext().createTempSymbol();
-      MCSymbol *EndLabel = MMI.getContext().createTempSymbol();
-      EHInfo->addIPToStateRange(State, BeginLabel, EndLabel);
-
-      // Insert EH Labels
       auto MBBb = MBB->getFirstNonPHI();
       MachineInstr *MIb = &*MBBb;
       if (MIb->isTerminator())
         continue;
+
+      // Insert EH Labels
+      MCSymbol *BeginLabel = MMI.getContext().createTempSymbol();
+      MCSymbol *EndLabel = MMI.getContext().createTempSymbol();
+      EHInfo->addIPToStateRange(State, BeginLabel, EndLabel);
       BuildMI(*MBB, MBBb, SDB->getCurDebugLoc(),
               TII->get(TargetOpcode::EH_LABEL))
           .addSym(BeginLabel);
@@ -1318,7 +1318,7 @@ void SelectionDAGISel::reportIPToStateForBlocks(MachineFunction *MF) {
   }
 }
 
-      /// isFoldedOrDeadInstruction - Return true if the specified instruction is
+/// isFoldedOrDeadInstruction - Return true if the specified instruction is
 /// side-effect free and is either dead or folded into a generated instruction.
 /// Return false if it needs to be emitted.
 static bool isFoldedOrDeadInstruction(const Instruction *I,
