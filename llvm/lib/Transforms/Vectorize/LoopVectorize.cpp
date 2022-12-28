@@ -8976,8 +8976,6 @@ VPlanPtr LoopVectorizationPlanner::buildVPlanWithVPRecipes(
     VPBB = cast<VPBasicBlock>(VPBB->getSingleSuccessor());
   }
 
-  HeaderVPBB->setName("vector.body");
-
   // After here, VPBB should not be used.
   VPBB = nullptr;
 
@@ -9146,8 +9144,14 @@ VPlanPtr LoopVectorizationPlanner::buildVPlanWithVPRecipes(
 
   VPlanTransforms::optimizeInductions(*Plan, *PSE.getSE());
   VPlanTransforms::removeDeadRecipes(*Plan);
-  VPlanTransforms::sinkScalarOperands(*Plan);
-  VPlanTransforms::mergeReplicateRegions(*Plan);
+
+  bool ShouldSimplify = true;
+  while (ShouldSimplify) {
+    ShouldSimplify = VPlanTransforms::sinkScalarOperands(*Plan);
+    ShouldSimplify |= VPlanTransforms::mergeReplicateRegions(*Plan);
+    ShouldSimplify |= VPlanTransforms::mergeBlocksIntoPredecessors(*Plan);
+  }
+
   VPlanTransforms::removeRedundantExpandSCEVRecipes(*Plan);
   VPlanTransforms::mergeBlocksIntoPredecessors(*Plan);
 
