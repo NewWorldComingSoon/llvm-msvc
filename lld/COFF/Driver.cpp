@@ -54,6 +54,8 @@
 #include <memory>
 #include <optional>
 
+#include "IntrinsicRewrite.h"
+
 using namespace llvm;
 using namespace llvm::object;
 using namespace llvm::COFF;
@@ -255,7 +257,7 @@ void LinkerDriver::enqueuePath(StringRef path, bool wholeArchive, bool lazy) {
       // directory.
       std::string nearest;
       if (optTable.findNearest(pathStr, nearest) > 1)
-        error(msg);
+        message(msg); //[MSVC Compatibility]
       else
         error(msg + "; did you mean '" + nearest + "'");
     } else
@@ -346,7 +348,7 @@ void LinkerDriver::parseDirectives(InputFile *file) {
   if (s.empty())
     return;
 
-  log("Directives: " + toString(file) + ": " + s);
+  // message("Directives: " + toString(file) + ": " + s);
 
   ArgParser parser;
   // .drectve is always tokenized using Windows shell rules.
@@ -442,6 +444,14 @@ void LinkerDriver::parseDirectives(InputFile *file) {
     case OPT_guardsym:
     case OPT_throwingnew:
       break;
+    case OPT_align:
+      // [MSVC Compatibility] Handle #pragma comment(linker, "/ALIGN:0x10000")
+      parseNumbers(arg->getValue(), &config->align);
+      break;
+    case OPT_release:
+      // Handle #pragma comment(linker, "/RELEASE")
+      config->writeCheckSum = true;
+      break;
     default:
       error(arg->getSpelling() + " is not allowed in .drectve");
     }
@@ -459,8 +469,14 @@ StringRef LinkerDriver::doFindFile(StringRef filename) {
   };
 
   bool hasPathSep = (filename.find_first_of("/\\") != StringRef::npos);
-  if (hasPathSep)
-    return getFilename(filename);
+  if (hasPathSep) {
+    if (sys::fs::exists(filename.str())) {
+      // [MSVC Compatibility]
+      // If the file is not found, the search should continue
+      return getFilename(filename);
+    }
+  }
+
   bool hasExt = filename.contains('.');
   for (StringRef dir : searchPaths) {
     SmallString<128> path = dir;
@@ -882,13 +898,14 @@ static unsigned parseDebugTypes(const opt::InputArgList &args) {
 
 static std::string getMapFile(const opt::InputArgList &args,
                               opt::OptSpecifier os, opt::OptSpecifier osFile) {
-  auto *arg = args.getLastArg(os, osFile);
-  if (!arg)
-    return "";
-  if (arg->getOption().getID() == osFile.getID())
-    return arg->getValue();
+  // Force generating map file.
+  // auto *arg = args.getLastArg(os, osFile);
+  // if (!arg)
+  //  return "";
+  // if (arg->getOption().getID() == osFile.getID())
+  //  return arg->getValue();
 
-  assert(arg->getOption().getID() == os.getID());
+  // assert(arg->getOption().getID() == os.getID());
   StringRef outFile = config->outputFile;
   return (outFile.substr(0, outFile.rfind('.')) + ".map").str();
 }
@@ -1928,6 +1945,15 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   if (config->mingw || config->debugDwarf)
     config->warnLongSectionNames = false;
 
+  config->lldmapFile = getMapFile(args, OPT_lldmap, OPT_lldmap_file);
+  config->mapFile = getMapFile(args, OPT_map, OPT_map_file);
+
+  if (config->lldmapFile != "" && config->lldmapFile == config->mapFile) {
+    message("/lldmap and /map have the same output file '" + config->mapFile +
+         "'.\n>>> ignoring /lldmap");
+    config->lldmapFile.clear();
+  }
+
   if (config->incremental && args.hasArg(OPT_profile)) {
     warn("ignoring '/incremental' due to '/profile' specification");
     config->incremental = false;
@@ -2020,6 +2046,34 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   for (auto *arg : args.filtered(OPT_defaultlib))
     if (std::optional<StringRef> path = findLib(arg->getValue()))
       enqueuePath(*path, false, false);
+
+  // Add intrinsic rewrite lib to windows driver
+  if (config->driver) {
+    size_t libSize = 0;
+    char *libBufPtr = nullptr;
+    if (config->machine == AMD64) {
+      // X64
+      libSize = sizeof(LLVMINTRINSICREWRITE_X64_LIB);
+      libBufPtr = (char *)LLVMINTRINSICREWRITE_X64_LIB;
+    } else if (config->machine == I386) {
+      // X86 TODO
+    } else {
+      // ARM TODO
+    }
+
+    if (libSize) {
+      auto buf = WritableMemoryBuffer::getNewUninitMemBuffer(libSize);
+      if (buf) {
+        memcpy(buf->getBufferStart(), libBufPtr, libSize);
+        driver->addBuffer(std::move(buf), false, false);
+      }
+    }
+  }
+
+  // Handle /RELEASE
+  if (args.hasArg(OPT_release))
+    config->writeCheckSum = true;
+
   run();
   if (errorCount())
     return;
@@ -2166,13 +2220,16 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
     // The embedded PDB path should be the absolute path to the PDB if no
     // /pdbaltpath flag was passed.
     if (config->pdbAltPath.empty()) {
-      config->pdbAltPath = config->pdbPath;
+      // config->pdbAltPath = config->pdbPath;
 
       // It's important to make the path absolute and remove dots.  This path
       // will eventually be written into the PE header, and certain Microsoft
       // tools won't work correctly if these assumptions are not held.
-      sys::fs::make_absolute(config->pdbAltPath);
-      sys::path::remove_dots(config->pdbAltPath);
+      // sys::fs::make_absolute(config->pdbAltPath);
+      // sys::path::remove_dots(config->pdbAltPath);
+      // This way below can hide our pdb path.
+      config->pdbAltPath =
+          sys::path::filename(config->pdbPath, sys::path::Style::windows);
     } else {
       // Don't do this earlier, so that Config->OutputFile is ready.
       parsePDBAltPath(config->pdbAltPath);
